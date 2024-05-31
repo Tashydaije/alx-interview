@@ -11,7 +11,7 @@ def pascal_triangle(n):
             [] otherwise
     """
     if n <= 0:
-        return [];
+        return []
 
     """Initialize first row with 1"""
     triangle = [[1]]
