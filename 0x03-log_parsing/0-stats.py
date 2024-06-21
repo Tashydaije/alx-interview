@@ -1,61 +1,72 @@
 #!/usr/bin/python3
 
-"""A script that reads stdin lineby line and computes metrics"""
-
+"""Log parser from stdin and computes metrics"""
 import sys
+import re
 import signal
 
-# Initialize metrics
-total_file_size = 0
-status_code_counts = {200: 0, 301: 0, 400: 0, 401: 0, 403: 0, 404: 0, 405: 0, 500: 0}
-line_count = 0
 
-def print_stats():
+log_metadata: dict = {
+    'line_count': 0,
+    'total_file_size': 0,
+    'status_code_count': {
+        200: 0,
+        301: 0,
+        400: 0,
+        401: 0,
+        403: 0,
+        404: 0,
+        405: 0,
+        500: 0
+    }
+}
+
+
+def print_statistics(log_metadata: dict):
     """Prints the log statistics of requests"""
-    print(f"File size: {total_file_size}")
-    for code in sorted(status_code_counts.keys()):
-        if status_code_counts[code] > 0:
-            print(f"{code}: {status_code_counts[code]}")
+    print("File size: {}".format(log_metadata['total_file_size']), flush=True)
+    for stat_code, count in sorted(log_metadata['status_code_count'].items()):
+        if count > 0:
+            print("{}: {}".format(stat_code, count), flush=True)
 
-def handle_interrupt(signum, frame):
+
+def signal_handler(sig, frame):
     """Handles the CTRL+C command signal"""
-    print_stats()
     sys.exit(0)
 
-# Handle keyboard interrupt (CTRL + C)
-signal.signal(signal.SIGINT, handle_interrupt)
 
-for line in sys.stdin:
+# <IPAddress> - [<date>] "GET /projects/260 HTTP/1.1" <status code> <file size>
+LOG_PATTERN = re.compile(r'^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}) '
+                         r'- \[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{6})\] '
+                         r'"GET /projects/(\d+) HTTP/1\.1" (\d{3}) (\d+)$')
+
+
+def read_input(log_metadata: dict):
+    """Read api request logs and update the log metadata"""
     try:
-        parts = line.split()
-        if len(parts) != 9:
-            continue
-        ip, dash, date, method, resource, protocol, status_code_str, file_size_str = parts[0], parts[1], parts[2], parts[3], parts[4], parts[5], parts[6], parts[7]
-        
-        # Validate the format
-        if dash != '-' or not date.startswith('[') or not date.endswith(']') or not method.startswith('"GET') or not protocol.endswith('"') or not resource.startswith('/projects/260'):
-            continue
-        
-        # Parse status code and file size
-        try:
-            status_code = int(status_code_str)
-            file_size = int(file_size_str)
-        except ValueError:
-            continue
+        for line in sys.stdin:
+            # Filter out logs that match the valid pattern
+            matchedLog = re.match(LOG_PATTERN, line)
 
-        # Update metrics
-        total_file_size += file_size
-        if status_code in status_code_counts:
-            status_code_counts[status_code] += 1
+            # Keep track of valid logs only
+            if matchedLog is not None:
+                status_code = int(matchedLog.group(4))
+                log_metadata['total_file_size'] += int(matchedLog.group(5))
+                if status_code in log_metadata['status_code_count'].keys():
+                    log_metadata['status_code_count'][status_code] += 1
+            else:
+                continue
+            # Count the number of lines so far
+            log_metadata['line_count'] += 1
+            # Log statistics after every 10 requests
+            if log_metadata['line_count'] % 10 == 0:
+                print_statistics(log_metadata)
+    finally:
+        print_statistics(log_metadata)
 
-        line_count += 1
 
-        # Print stats every 10 lines
-        if line_count % 10 == 0:
-            print_stats()
+# Registering signal handler for CTRL+C
+signal.signal(signal.SIGINT, signal_handler)
 
-    except Exception:
-        continue
-
-# Print final stats at the end if less than 10 lines are processed
-print_stats()
+# Read logs piped inp and parse it
+read_input(log_metadata)
